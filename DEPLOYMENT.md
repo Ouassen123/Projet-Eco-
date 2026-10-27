@@ -1,146 +1,120 @@
-# Déploiement en Production
+# Déploiement Gratuit — Vercel + Neon PostgreSQL
 
-## Prérequis
+Ce guide permet de déployer l’application gratuitement sur **Vercel** avec une base de données **PostgreSQL hébergée sur Neon**.
 
-- Node.js 20+ 
-- PostgreSQL 14+
-- npm 10+
+---
 
-## 1. Configuration de l'environnement
+## 1. Préparer la base de données (Neon)
 
-```bash
-# Copier le fichier d'exemple
-cp .env.example .env
+1. Va sur [https://neon.tech](https://neon.tech)
+2. Crée un compte (GitHub possible)
+3. Clique **Create Project**
+4. Choisis :
+   - **Project name** : `projet-eco`
+   - **Region** : `EU Central (Frankfurt)` ou le plus proche
+   - **Postgres version** : `16`
+5. Clique **Create Project**
+6. Neon affiche une **Connection string** :
+   ```
+   postgresql://neondb_owner:xxxxx@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require
+   ```
+   **Copie cette URL.**
 
-# Éditer .env pour la production
-# DATABASE_URL="postgresql://user:password@localhost:5432/ordres_mission?schema=public"
-# AUTH_SECRET="générer avec: openssl rand -hex 32"
-```
+---
 
-**⚠ IMPORTANT :** Le `AUTH_SECRET` doit être une chaîne aléatoire d'au moins 32 caractères.
+## 2. Déployer sur Vercel
 
-## 2. Migration SQLite → PostgreSQL
+1. Va sur [https://vercel.com](https://vercel.com)
+2. Clique **Add New Project**
+3. **Import Git Repository** : sélectionne `Ouassen123/Projet-Eco-`
+4. Vercel détecte automatiquement **Next.js**. Ne change pas le framework.
+5. Avant de déployer, ajoute les **variables d’environnement** :
 
-### 2.1 Créer la base PostgreSQL
+   | Variable | Valeur |
+   |----------|--------|
+   | `DATABASE_URL` | `postgresql://neondb_owner:xxxxx@...` *(la chaîne Neon)* |
+   | `AUTH_SECRET` | `une-chaine-secrete-longue-et-aleatoire-32-caracteres` |
+   | `AUTH_SECURE_COOKIE` | `true` |
 
-```sql
-CREATE DATABASE ordres_mission;
-CREATE USER om_app WITH ENCRYPTED PASSWORD 'votre_mot_de_passe';
-GRANT ALL PRIVILEGES ON DATABASE ordres_mission TO om_app;
-```
+6. Clique **Deploy**.
 
-### 2.2 Pousser le schéma PostgreSQL
+---
 
-```bash
-# Utiliser le schéma PostgreSQL
-npx prisma db push --schema=prisma/schema-postgres.prisma
-```
+## 3. Initialiser la base après le déploiement
 
-### 2.3 Migrer les données depuis SQLite (si nécessaire)
+Après le premier déploiement, la base est vide. Il faut :
 
-```bash
-# 1. Exporter les données SQLite
-sqlite3 dev.db .dump > backup_sqlite.sql
-
-# 2. Importer dans PostgreSQL (adaptation manuelle du SQL peut être nécessaire)
-# Ou utiliser un outil de migration comme pgloader
-```
-
-### 2.4 Seeder les données de production
+### A. Pousser le schéma (depuis ton PC local)
 
 ```bash
-# Référentiels (barèmes, trajets, jours fériés, cadre/échelle)
-npx prisma db seed --schema=prisma/schema-postgres.prisma
+# Définir la base de prod temporairement
+$env:DATABASE_URL="postgresql://neondb_owner:xxxxx@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require"
 
-# Utilisateurs (CHANGER LES MOTS DE PASSE)
-# Éditer scripts/seed_users.ts avec de vrais mots de passe avant d'exécuter
-npx tsx scripts/seed_users.ts
+# Pousser le schéma Prisma
+npx prisma db push
 
-# Importer le personnel
-# Via l'interface web : Paramètres > Importer personnel (fichier Excel)
+# Seeder les données initiales (utilisateurs, barèmes, trajets, jours fériés)
+npx prisma db seed
 ```
 
-## 3. Build et démarrage
+### B. Alternative : utiliser `prisma migrate deploy`
+
+Si tu préfères les migrations (recommandé en production) :
 
 ```bash
-# Build production
-npm run build
-
-# Démarrer le serveur
-npm start
-# ou avec un gestionnaire de processus :
-pm2 start npm --name "om-app" -- start
+# Depuis ton PC local avec DATABASE_URL pointant vers Neon
+npx prisma migrate deploy
+npx prisma db seed
 ```
 
-## 4. Configuration du serveur web (recommandé)
+---
 
-### Nginx reverse proxy
+## 4. Variables d’environnement sur Vercel
 
-```nginx
-server {
-    listen 80;
-    server_name om-service.univ.ma;
+Dans Vercel → **Settings → Environment Variables**, ajoute :
 
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
+```env
+DATABASE_URL=postgresql://neondb_owner:xxxxx@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require
+AUTH_SECRET=ta-chaine-secrete-ici
+AUTH_SECURE_COOKIE=true
 ```
 
-### HTTPS avec Let's Encrypt
+**⚠ AUTH_SECRET** : génère une vraie clé, par exemple :
 
 ```bash
-sudo certbot --nginx -d om-service.univ.ma
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-## 5. Sauvegardes
+---
 
-Voir `docs/BACKUP_STRATEGY.md` pour le script de sauvegarde complète.
+## 5. Dépannage
 
-```bash
-# Sauvegarde quotidienne automatique (cron)
-0 2 * * * /opt/scripts/backup_db.sh >> /var/log/om_backup.log 2>&1
-```
+### Erreur `Table 'public.Utilisateur' does not exist`
+→ Tu as oublié `npx prisma db push` ou `migrate deploy` sur la base Neon.
 
-## 6. Jours fériés — Préparation année suivante
+### Erreur `PrismaClientInitializationError`
+→ Vérifie `DATABASE_URL` dans Vercel et Neon (pas de guillemets, pas d’espace).
 
-```bash
-# Générer les jours fériés récurrents pour la nouvelle année
-npx tsx scripts/prepare_feries.ts 2027
-```
+### Erreur `Invalid session cookie`
+→ `AUTH_SECRET` n’est pas configuré ou trop court.
 
-Les jours fériés lunaires (Aïd, Mawlid, etc.) doivent être saisis manuellement
-par l'administrateur via Paramètres > Jours fériés.
+### Impossible de se connecter
+→ Vérifie que `AUTH_SECURE_COOKIE` est `true` et que tu utilises **HTTPS**.
 
-## 7. Templates de documents
+---
 
-Les templates sont dans `templates/` :
-- `ordre-mission.docx` — Modèle Ordre de Mission
-- `etat-sommes-dues.docx` — Modèle État des Sommes Dues
-- `etat-kilometrique.xlsx` — Modèle État Kilométrique
+## 6. Accès après déploiement
 
-Le chemin est résolu via `path.join(process.cwd(), "templates", ...)` qui fonctionne
-correctement en production (le répertoire `templates/` est inclus dans le build).
+- URL Vercel : `https://projet-eco-xxxxx.vercel.app`
+- Comptes par défaut (après seed) :
+  - `Loubna` / `Loubna@0102` (admin)
+  - `Oumaima` / `Oumaima@0102` (gestionnaire)
+  - `Ikhlasse` / `Ikhlasse@0102` (consultation)
 
-## 8. Sécurité
+---
 
-- **Mots de passe :** Hachés avec bcrypt (jamais en clair)
-- **Sessions :** Signées avec HMAC SHA-256 via `AUTH_SECRET`
-- **Cookies :** `httpOnly`, `secure` en production, `sameSite: lax`
-- **Middleware :** Toutes les routes API sont protégées (sauf `/api/auth/login`)
-- **Rôles :** Vérifiés côté serveur sur chaque route API
+## 7. Limitations gratuites
 
-## 9. Vérifications post-déploiement
-
-- [ ] Connexion avec chaque rôle (admin, gestionnaire, consultation)
-- [ ] Création d'un OM de test
-- [ ] Validation et paiement d'un OM
-- [ ] Génération des 3 documents (OM, ESD, kilométrique)
-- [ ] Consultation du tableau de bord
-- [ ] Vérifier que CONSULTATION ne peut pas créer/modifier
-- [ ] Vérifier que GESTIONNAIRE ne peut pas modifier les référentiels
+- **Neon** : 0.5 GB de stockage, 2 projects gratuits.
+- **Vercel** : 100 GB de bande passante/mois, déploiement illimité.
+- Pas de crons gratuits sur Vercel : l’archivage automatique des exercices se fait à la première requête après `01/01/2027`, pas par un cron.
