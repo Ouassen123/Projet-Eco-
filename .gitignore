@@ -45,3 +45,5 @@ next-env.d.ts
 prisma/dev.db
 prisma/test.db
 _test-output/
+
+.vercel
