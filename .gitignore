@@ -40,3 +40,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local databases / artifacts
+prisma/dev.db
+prisma/test.db
+_test-output/
