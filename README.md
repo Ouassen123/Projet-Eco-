@@ -1,36 +1,114 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Application Service Économique — Gestion des Ordres de Mission
 
-## Getting Started
+Application Next.js 16 pour la gestion des ordres de mission et indemnités du Service Économique (université).
 
-First, run the development server:
+## Fonctionnalités
+
+- Gestion du personnel (import Excel, 198 employés)
+- Création et cycle de vie des ordres de mission (BROUILLON → VALIDE → PAYE / ANNULE)
+- Calcul automatique des indemnités (mission + kilométrique) avec snapshots immuables
+- Gestion des référentiels (barèmes, trajets, jours fériés, cadre/échelle)
+- Génération de documents (Ordre de Mission DOCX, État des Sommes Dues DOCX, État Kilométrique XLSX)
+- Authentification avec rôles (ADMIN, GESTIONNAIRE, CONSULTATION)
+- Audit trail complet (utilisateur, ancienne/nouvelle valeur)
+- Tableau de bord avec agrégations
+
+## Stack technique
+
+- **Next.js 16** (App Router, Turbopack)
+- **Prisma ORM** (SQLite en dev, PostgreSQL en production)
+- **TypeScript** strict
+- **Vitest** pour les tests
+- **ExcelJS** pour la génération XLSX
+- **PizZip** pour la génération DOCX
+- **bcryptjs** pour le hachage des mots de passe
+
+## Démarrage rapide (développement)
 
 ```bash
+# Installer les dépendances
+npm install
+
+# Configurer l'environnement
+cp .env.example .env
+# Éditer .env : DATABASE_URL et AUTH_SECRET
+
+# Pousser le schéma en base
+npx prisma db push
+
+# Seeder les référentiels
+npx prisma db seed
+
+# Seeder les utilisateurs (admin/gestionnaire/consultation)
+npx tsx scripts/seed_users.ts
+
+# Lancer le serveur de développement
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Comptes par défaut (développement)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Login | Mot de passe | Rôle |
+|-------|-------------|------|
+| admin | admin123 | ADMIN |
+| gestionnaire | gest123 | GESTIONNAIRE |
+| consultation | cons123 | CONSULTATION |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+**⚠ Changer ces mots de passe en production.**
 
-## Learn More
+## Tests
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+# Tous les tests
+npm test
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+# TypeScript
+npx tsc --noEmit
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+# Build production
+npm run build
+```
 
-## Deploy on Vercel
+## Scripts utilitaires
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+# Préparer les jours fériés récurrents pour une nouvelle année
+npx tsx scripts/prepare_feries.ts 2027
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+# Seeder les utilisateurs
+npx tsx scripts/seed_users.ts
+
+# Vérifier les référentiels
+npx tsx scripts/check_referentiels.ts
+```
+
+## Structure du projet
+
+```
+webapp/
+├── prisma/
+│   ├── schema.prisma          # Schéma SQLite (développement)
+│   ├── schema-postgres.prisma  # Schéma PostgreSQL (production)
+│   └── seed.ts                # Seed des référentiels
+├── src/
+│   ├── lib/                   # Moteur métier (pur, sans React)
+│   ├── app/api/               # Routes API REST
+│   ├── app/                   # Pages frontend
+│   └── middleware.ts          # Authentification
+├── templates/                 # Modèles DOCX/XLSX
+├── scripts/                   # Scripts utilitaires
+└── docs/                      # Documentation
+```
+
+## Rôles et permissions
+
+| Action | ADMIN | GESTIONNAIRE | CONSULTATION |
+|--------|-------|---------------|--------------|
+| Consulter dashboard, OM, personnel | ✅ | ✅ | ✅ |
+| Créer/modifier OM | ✅ | ✅ | ❌ |
+| Valider/annuler/payer OM | ✅ | ✅ | ❌ |
+| Modifier référentiels | ✅ | ❌ | ❌ |
+| Importer personnel | ✅ | ❌ | ❌ |
+| Générer documents | ✅ | ✅ | ✅ |
+
+Voir `DEPLOYMENT.md` pour le déploiement en production.

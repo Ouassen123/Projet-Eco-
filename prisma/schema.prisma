@@ -1,0 +1,288 @@
+// Schema Prisma - Application Service Economique
+// Gestion des ordres de mission, indemnites, personnel
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// PERSONNEL
+// ---------------------------------------------------------------------------
+
+enum TypePersonnel {
+  ADMINISTRATIF
+  ENSEIGNANT
+}
+
+// ---------------------------------------------------------------------------
+// UTILISATEURS / AUTHENTIFICATION
+// ---------------------------------------------------------------------------
+
+enum RoleUtilisateur {
+  ADMIN
+  GESTIONNAIRE
+  CONSULTATION
+}
+
+model Utilisateur {
+  id            String   @id @default(cuid())
+  login         String   @unique
+  motDePasse    String   // hash bcrypt (jamais en clair)
+  nomComplet    String
+  role          RoleUtilisateur @default(GESTIONNAIRE)
+  actif         Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  actions HistoriqueAction[]
+}
+
+model Employe {
+  id                       String   @id @default(cuid())
+  matricule                String   @unique // DOTI
+  nomFr                    String
+  prenomFr                 String
+  nomAr                    String?
+  prenomAr                 String?
+  type                     TypePersonnel
+  cadre                    String // CADRE (admin) ou cadre (enseignant)
+  grade                    String? // grade (enseignant uniquement: A/B/C)
+  echelon                  Int?
+  indice                   Int?
+  echelonExceptionnel      Boolean  @default(false) // echelon exceptionnel echelle 11
+  vehiculeMatricule        String? // vehicule personnel actuel (reutilisable)
+  vehiculePuissanceFiscale Int?
+  actif                    Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  ordresMission OrdreMission[]
+
+  @@index([type])
+  @@index([cadre])
+}
+
+// Table de correspondance CADRE/GRADE -> ECHELLE DE REMUNERATION (administrable)
+model CadreEchelleMapping {
+  id       String        @id @default(cuid())
+  cadre    String
+  // "" = pas de distinction de grade (ex: personnel administratif).
+  // Chaine vide plutot que null afin de garder la contrainte unique
+  // composite utilisable avec upsert (SQLite/Prisma ne permettent pas
+  // null de facon fiable dans une cle unique composite).
+  grade    String        @default("")
+  type     TypePersonnel
+  echelle  Int // 1 a 11
+  actif    Boolean       @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([cadre, grade, type])
+}
+
+// ---------------------------------------------------------------------------
+// REFERENTIELS (administrables)
+// ---------------------------------------------------------------------------
+
+model BaremeMission {
+  id                 String   @id @default(cuid())
+  code               String   @unique // ex: INDICE_704, ECHELLE_11, ECHELLE_8_9_10, ECHELLE_6_7, ECHELLE_1_5
+  libelle            String
+  priorite           Int // 1 = verifie en premier (regle indice >= 704)
+  indiceMin          Int? // regle basee sur indice (ex: >= 704)
+  echelleMin         Int? // regle basee sur echelle (bornes incluses)
+  echelleMax         Int?
+  tauxJour1a15       Float
+  tauxJour16Plus     Float
+  referenceJuridique String?
+  actif              Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model BaremeKilometrique {
+  id                 String   @id @default(cuid())
+  puissanceFiscale   Int      @unique // CV exact (6,7,8,9,10,11...)
+  tauxDhKm           Float
+  referenceJuridique String?
+  actif              Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model Trajet {
+  id           String   @id @default(cuid())
+  villeDepart  String
+  villeArrivee String
+  // Distance ALLER-RETOUR totale en km (regle validee, confirmee par
+  // l'historique reel "Etat des sommes dues" : Tanger-Rabat et Retour =
+  // 556 km). Ne PAS stocker l'aller simple ici.
+  distanceKm   Float
+  actif        Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ordresMission OrdreMission[]
+
+  @@unique([villeDepart, villeArrivee])
+}
+
+model JourFerie {
+  id              String   @id @default(cuid())
+  date            DateTime // date du jour ferie (annee incluse)
+  libelle         String
+  recurrentAnnuel Boolean  @default(false) // si true, seul mois/jour comptent chaque annee
+  actif           Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ReferenceJuridique {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  titre     String
+  texte     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Compteur generique pour la numerotation (strategie modifiable sans casser le code appelant)
+model Sequence {
+  id     String @id @default(cuid())
+  scope  String @unique // ex: "OM_GLOBAL", "OM_2026"
+  valeur Int    @default(0)
+}
+
+// ---------------------------------------------------------------------------
+// ORDRE DE MISSION
+// ---------------------------------------------------------------------------
+
+enum MoyenTransport {
+  TRANSPORT_PUBLIC
+  VOITURE_PERSONNELLE
+  VOITURE_SERVICE
+}
+
+enum StatutOM {
+  BROUILLON
+  VALIDE
+  ANNULE
+  PAYE
+}
+
+model OrdreMission {
+  id       String @id @default(cuid())
+  numero   String? @unique // numero officiel (format final a definir) - null tant que non attribue
+  numeroSequence Int // compteur technique interne unique (garantit l'unicite, independant du format d'affichage)
+
+  employeId String
+  employe   Employe @relation(fields: [employeId], references: [id])
+
+  objetMission String
+
+  villeDepart  String
+  villeArrivee String
+  trajetId     String?
+  trajet       Trajet? @relation(fields: [trajetId], references: [id])
+
+  dateHeureDepart DateTime
+  dateHeureRetour DateTime
+
+  moyenTransport MoyenTransport
+
+  // Snapshot vehicule personnel (si applicable) - ne doit jamais changer retroactivement
+  vehiculeMatriculeSnapshot        String?
+  vehiculePuissanceFiscaleSnapshot Int?
+  tauxKmSnapshot                   Float?
+  kilometrageSnapshot              Float?
+  montantKilometriqueSnapshot      Float?
+
+  // Snapshot financier indemnite de mission
+  echelleSnapshot            Int?
+  indiceSnapshot             Int?
+  categorieTauxSnapshot      String? // code du BaremeMission applique
+  tauxJour1a15Snapshot       Float?
+  tauxJour16PlusSnapshot     Float?
+  nbJoursCumulesAvantMission Int? // jours deja effectues dans la meme localite avant cette mission
+  nbRepasMidi                Int?
+  nbRepasSoir                Int?
+  nbDecouchers               Int?
+  montantIndemniteMissionSnapshot Float?
+
+  montantTotalSnapshot Float?
+
+  anneeEconomique Int?
+
+  statut StatutOM @default(BROUILLON)
+
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  validatedAt DateTime?
+  canceledAt  DateTime?
+  paidAt      DateTime?
+
+  historique HistoriqueAction[]
+
+  @@index([employeId])
+  @@index([statut])
+  @@index([dateHeureDepart, dateHeureRetour])
+  @@index([anneeEconomique])
+}
+
+// ---------------------------------------------------------------------------
+// EXERCICE ECONOMIQUE
+// ---------------------------------------------------------------------------
+
+model ExerciceEconomique {
+  id        String   @id @default(cuid())
+  annee     Int      @unique
+  dateDebut DateTime
+  dateFin   DateTime
+  actif     Boolean  @default(false)
+  archive   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([actif])
+  @@index([archive])
+}
+
+// ---------------------------------------------------------------------------
+// HISTORIQUE / AUDIT
+// ---------------------------------------------------------------------------
+
+enum TypeAction {
+  CREATION
+  MODIFICATION
+  VALIDATION
+  ANNULATION
+  PAIEMENT
+  IMPRESSION
+  EXPORT
+  MODIFICATION_REFERENTIEL
+  MODIFICATION_PERSONNEL
+  MODIFICATION_VEHICULE
+}
+
+model HistoriqueAction {
+  id             String       @id @default(cuid())
+  ordreMissionId String?
+  ordreMission   OrdreMission? @relation(fields: [ordreMissionId], references: [id])
+  action         TypeAction
+  auteur         String?
+  utilisateurId  String?
+  utilisateur    Utilisateur? @relation(fields: [utilisateurId], references: [id])
+  detail         String?
+  ancienneValeur String?     // JSON serialise de l'ancienne valeur (audit)
+  nouvelleValeur String?     // JSON serialise de la nouvelle valeur (audit)
+  createdAt      DateTime     @default(now())
+
+  @@index([ordreMissionId])
+  @@index([utilisateurId])
+  @@index([createdAt])
+}

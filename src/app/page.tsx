@@ -1,69 +1,182 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  PlusCircle,
+  Users,
+  CalendarDays,
+  History,
+  FileText,
+  FileCheck2,
+  Wallet,
+  Ban,
+  Car,
+  Route,
+} from "lucide-react";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { PageLoader } from "@/components/ui/Spinner";
+import { Button } from "@/components/ui/Button";
+import { Card, CardBody } from "@/components/ui/Card";
+import { apiGet, messageErreur } from "@/lib/apiClient";
+import { formaterMontant, moisEtAnneeFr } from "@/lib/dateUtils";
+import { useToast } from "@/components/toast/ToastProvider";
+import { useExercice } from "@/components/layout/ExerciceContext";
+
+interface DonneesDashboard {
+  periode: { annee: number; mois: number; exerciceEconomique: number };
+  nbOMCeMois: number;
+  nbBrouillon: number;
+  nbValide: number;
+  nbPaye: number;
+  nbAnnule: number;
+  nbPersonnesEnDeplacement: number;
+  totalIndemnitesMission: number;
+  totalIndemnitesKilometrique: number;
+}
+
+function KpiCard({
+  icone: Icone,
+  gradient,
+  label,
+  valeur,
+}: {
+  icone: typeof Users;
+  gradient: string;
+  label: string;
+  valeur: string | number;
+}) {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div className="rounded-2xl border border-white/50 bg-gradient-to-br from-white via-white to-pink-50 p-5 shadow-lg shadow-pink-950/5 transition hover:-translate-y-0.5 hover:shadow-xl">
+      <div className="flex items-center gap-4">
+        <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${gradient} text-white shadow-md`}>
+          <Icone size={21} />
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
+          <p className="mt-0.5 text-2xl font-semibold text-slate-900">{valeur}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function TableauDeBordPage() {
+  const [donnees, setDonnees] = useState<DonneesDashboard | null>(null);
+  const [chargement, setChargement] = useState(true);
+  const { annee } = useExercice();
+  const { erreur } = useToast();
+
+  useEffect(() => {
+    if (!annee) return;
+    let actif = true;
+    apiGet<DonneesDashboard>(`/api/dashboard?anneeEconomique=${annee}`)
+      .then((d) => {
+        if (actif) setDonnees(d);
+      })
+      .catch((e) => erreur(messageErreur(e)))
+      .finally(() => {
+        if (actif) setChargement(false);
+      });
+    return () => {
+      actif = false;
+    };
+  }, [annee, erreur]);
+
+  if (chargement) return <PageLoader label="Chargement du tableau de bord..." />;
+  if (!donnees) return null;
+
+  const nomMois = moisEtAnneeFr(new Date(Date.UTC(donnees.periode.annee, donnees.periode.mois - 1, 1)));
+
+  return (
+    <div>
+      <PageHeader
+        titre="Tableau de bord"
+        description={`Vue d'ensemble · ${nomMois} · Exercice ${donnees.periode.exerciceEconomique}`}
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
+          icone={FileText}
+          gradient="from-indigo-500 to-violet-500"
+          label="OM ce mois"
+          valeur={donnees.nbOMCeMois}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+        <KpiCard
+          icone={Users}
+          gradient="from-sky-500 to-cyan-500"
+          label="Personnes en déplacement"
+          valeur={donnees.nbPersonnesEnDeplacement}
+        />
+        <KpiCard
+          icone={Wallet}
+          gradient="from-emerald-500 to-teal-500"
+          label="Total indemnités"
+          valeur={formaterMontant(donnees.totalIndemnitesMission)}
+        />
+        <KpiCard
+          icone={Car}
+          gradient="from-amber-500 to-orange-500"
+          label="Total indemnités kilométriques"
+          valeur={formaterMontant(donnees.totalIndemnitesKilometrique)}
+        />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
+          icone={FileText}
+          gradient="from-amber-500 to-yellow-500"
+          label="OM en brouillon"
+          valeur={donnees.nbBrouillon}
+        />
+        <KpiCard
+          icone={Route}
+          gradient="from-sky-500 to-blue-500"
+          label="OM validés"
+          valeur={donnees.nbValide}
+        />
+        <KpiCard
+          icone={FileCheck2}
+          gradient="from-emerald-500 to-green-500"
+          label="OM payés"
+          valeur={donnees.nbPaye}
+        />
+        <KpiCard
+          icone={Ban}
+          gradient="from-rose-500 to-red-500"
+          label="OM annulés"
+          valeur={donnees.nbAnnule}
+        />
+      </div>
+
+      <Card className="mt-6">
+        <CardBody className="flex flex-wrap items-center gap-3">
+          <Link href="/ordres-mission/nouveau">
+            <Button variant="primary">
+              <PlusCircle size={16} />
+              Nouvel Ordre de Mission
+            </Button>
+          </Link>
+          <Link href="/personnel">
+            <Button variant="outline">
+              <Users size={16} />
+              Personnel
+            </Button>
+          </Link>
+          <Link href="/calendrier">
+            <Button variant="outline">
+              <CalendarDays size={16} />
+              Calendrier
+            </Button>
+          </Link>
+          <Link href="/ordres-mission">
+            <Button variant="outline">
+              <History size={16} />
+              Historique
+            </Button>
+          </Link>
+        </CardBody>
+      </Card>
     </div>
   );
 }
